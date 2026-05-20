@@ -16,4 +16,4 @@ reduce .stat[] as $item ({};
 )
     | to_entries
     | sort_by(-.value[0] // 0)[]
-    | "\(.key) \(.value[0]) \(.value[1])"
+    | "\(.key)\t\(.value[0])\t\(.value[1])"

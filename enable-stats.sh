@@ -1,19 +1,23 @@
-ff="$1"
+#!/usr/bin/env bash
 
-if [ ! -f "$ff" ]; then
-    echo "File not found!"
+set -eo pipefail
+
+ff="$1"
+if [ -z "$ff" ] || [ ! -f "$ff" ]; then
+    echo "Usage: $0 <xray-config.json>" >&2
     exit 1
 fi
 
-jq '
-    .stats = {} |
-    .policy.levels."0".statsUserUplink = true |
-    .policy.levels."0".statsUserDownlink = true |
-    .policy.system.statsInboundUplink = false |
-    .policy.system.statsInboundDownlink = false |
-    .policy.system.statsOutboundUplink = true |
-    .policy.system.statsOutboundDownlink = true |
-    .api.services = ["StatsService", "LoggerService", "HandlerService"]
-' "$ff" | sponge "$ff"
+rc=0
+python3 "$(dirname "$0")/enable-stats.py" "$ff" || rc=$?
 
-systemctl restart xray
+case "$rc" in
+    0)
+        systemctl restart xray
+        ;;
+    5)
+        ;;
+    *)
+        exit "$rc"
+        ;;
+esac

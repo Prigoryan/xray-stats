@@ -35,7 +35,7 @@ The file consists of multiple lines, each containing a traffic value in bytes. T
 
 The `install.sh` script installs a cron job from `xray-stats.cron`.
 
-It runs the `stats-collect` script every 5 minutes, and sums the traffic data for each user on the current date every hour.
+It runs the `stats-collect` script every 2 minutes, and runs `stats-shrink` to sum the traffic data for each user on the current date twice per hour (at `:29` and `:59`).
 
 ## Example directory structure
 

@@ -1,13 +1,15 @@
-#!/bin/env bash
+#!/usr/bin/env bash
 
 set -eo pipefail
 
 shrinkDate=${1:-$(date +%F)}
 
-source "$(dirname $0)/stats-utils.sh"
+source "$(dirname "$0")/stats-utils.sh"
 
 shrink() {
-    echo "$(sum-num-file $1)" > "$1"
+    local sum
+    sum=$(sum-num-file "$1")
+    echo "$sum" > "$1"
 }
 
 # shellcheck disable=SC2231 # Can contain globs. stats-shrink '2024-09-*'

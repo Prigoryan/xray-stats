@@ -1,4 +1,4 @@
-#!/bin/env bash
+#!/usr/bin/env bash
 
 set -eo pipefail
 
@@ -21,7 +21,10 @@ fi
 mkdir -p /usr/local/etc/xray-stats
 echo "$trafficDataDir" > /usr/local/etc/xray-stats/directory
 
-crontab < xray-stats.cron
+{
+    crontab -l 2>/dev/null | grep -v '/usr/local/bin/stats-' || true
+    cat xray-stats.cron
+} | crontab -
 
 cp stats-utils.sh stats-query stats-shrink stats-collect stats-to-user-down-up.jq \
     /usr/local/bin
