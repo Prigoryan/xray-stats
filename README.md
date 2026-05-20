@@ -12,7 +12,7 @@
 
 `stats-collect`: Collects traffic statistics using the xray API and processes them.
 
-`stats-query`: Summarizes the traffic data for each user on a specified date. If no date is provided, it defaults to the current date. It displays the downlink and uplink data in megabytes (MB) for each user.
+`stats-query`: Summarizes the traffic data for each user on a specified date. If no date is provided, it defaults to the current date. It displays the downlink and uplink data in human-readable units (`134`, `12K`, `1020M`, `1.1G`) with unit letters colored as a magnitude heatmap. Pass `--plain` for raw bytes.
 
 ## Configuration
 

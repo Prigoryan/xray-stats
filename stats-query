@@ -11,6 +11,39 @@ if [ "$1" == "--plain" ]; then
     shift
 fi
 
+# ANSI color constants used by print-header and print-user-stats.
+# Column colors (regular weight): down=blue, up=magenta, total=white.
+# Unit-letter heatmap (bright + bold): K=green, M=yellow, G/T=red.
+R=$'\033[0m'
+DOWN=$'\033[34m'   ; UP=$'\033[35m'   ; TOTAL=$'\033[37m'
+HEAT_K=$'\033[1;32m' ; HEAT_M=$'\033[1;33m' ; HEAT_G=$'\033[1;31m'
+
+# cell <bytes> <column-color-escape> <visible-width>
+# Right-aligns a numfmt-formatted byte count within `width` visible chars,
+# coloring digits with the column color and the unit letter with the
+# heatmap color. Emits no ANSI in --plain mode (cell is not called there).
+cell() {
+    local bytes=$1 col=$2 width=$3
+    local visible
+    # LC_ALL=C forces numfmt to use '.' as the decimal separator and
+    # ASCII digits, regardless of the user's locale, so the regex below
+    # (which expects '.') always matches.
+    visible=$(LC_ALL=C numfmt --to=iec "$bytes")
+    local pad=$(( width - ${#visible} ))
+    (( pad > 0 )) && printf '%*s' "$pad" ''
+    if [[ $visible =~ ^([0-9.]+)([KMGT])$ ]]; then
+        local digits=${BASH_REMATCH[1]} letter=${BASH_REMATCH[2]} hm
+        case $letter in
+            K)   hm=$HEAT_K ;;
+            M)   hm=$HEAT_M ;;
+            G|T) hm=$HEAT_G ;;
+        esac
+        printf '%s%s%s%s%s%s' "$col" "$digits" "$R" "$hm" "$letter" "$R"
+    else
+        printf '%s%s%s' "$col" "$visible" "$R"
+    fi
+}
+
 print-header() {
     queryUser=$1
     queryDate=$2
@@ -19,9 +52,19 @@ print-header() {
         return
     fi
 
-    echo -e "\033[1;33m$queryUser:  \033[1;0m$queryDate\033[1;0m"
+    echo -e "\033[1;33m$queryUser:\033[0m  $queryDate"
     echo
-    echo -e "           \033[1;34m↓ down (mb) \033[1;32m↑ up (mb) \033[1;35m∑ total (mb)\033[1;0m"
+    # Column header row: empty name area, then three columns right-aligned
+    # within a 7-visible-char box, separated by 2-space gaps. Leading spaces
+    # are hand-tuned because printf width specifiers count UTF-8 byte length,
+    # not visible char width.
+    printf '  %-8s' ''
+    printf ' %s↓ down%s'  "$DOWN"  "$R"
+    printf '  '
+    printf '   %s↑ up%s'  "$UP"    "$R"
+    printf '  '
+    printf '%s∑ total%s'  "$TOTAL" "$R"
+    printf '\n'
 }
 
 print-user-stats() {
@@ -39,17 +82,19 @@ print-user-stats() {
         return
     fi
 
-    local downMb=$((down / 1024 / 1024))
-    local upMb=$((up / 1024 / 1024))
-    local combinedMb=$((combined / 1024 / 1024))
-    local nameColor='' reset=''
+    local nameColor='' nameReset=''
     if [ "$username" = total ]; then
         echo
         nameColor=$'\033[1;33m'
-        reset=$'\033[1;0m'
+        nameReset=$R
     fi
-    printf '%s%-10s%s \033[1;34m%10s \033[1;32m%10s \033[1;35m%10s\033[1;0m\n' \
-        "$nameColor" "$username" "$reset" "$downMb" "$upMb" "$combinedMb"
+    printf '  %s%-8s%s' "$nameColor" "$username" "$nameReset"
+    cell "$down"     "$DOWN"  7
+    printf '  '
+    cell "$up"       "$UP"    7
+    printf '  '
+    cell "$combined" "$TOTAL" 7
+    printf '\n'
 }
 
 query() {

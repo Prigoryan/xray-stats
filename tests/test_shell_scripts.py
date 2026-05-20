@@ -2,10 +2,18 @@
 
 import datetime
 import os
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_ansi(s: str) -> str:
+    """Remove ANSI SGR escape sequences from `s` for substring assertions."""
+    return ANSI_RE.sub("", s)
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -195,6 +203,59 @@ def test_stats_query_total_sums_across_users(tmp_path):
     result = run(STATS_QUERY, "--plain", "2024-01-01", env=script_env(cfg))
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines()[-1] == "total 300 130 430"
+
+
+def test_stats_query_pretty_bytes_no_unit(tmp_path):
+    """Sub-1024 byte counts render as plain integers with no unit letter."""
+    cfg, traffic = make_config(tmp_path)
+    (traffic / "alice/down").mkdir(parents=True)
+    (traffic / "alice/up").mkdir(parents=True)
+    (traffic / "alice/down/2024-01-01").write_text("134\n")
+    (traffic / "alice/up/2024-01-01").write_text("0\n")
+    result = run(STATS_QUERY, "2024-01-01", env=script_env(cfg))
+    assert result.returncode == 0, result.stderr
+    stripped = strip_ansi(result.stdout)
+    assert "134" in stripped
+    assert not re.search(r"134[KMGT]", stripped)
+
+
+def test_stats_query_pretty_kib_uses_K(tmp_path):
+    """Kibibyte-range values use a K suffix."""
+    cfg, traffic = make_config(tmp_path)
+    (traffic / "alice/down").mkdir(parents=True)
+    (traffic / "alice/up").mkdir(parents=True)
+    (traffic / "alice/down/2024-01-01").write_text("12288\n")  # 12 KiB
+    (traffic / "alice/up/2024-01-01").write_text("0\n")
+    result = run(STATS_QUERY, "2024-01-01", env=script_env(cfg))
+    assert result.returncode == 0, result.stderr
+    stripped = strip_ansi(result.stdout)
+    assert "12K" in stripped
+
+
+def test_stats_query_pretty_gib_uses_G_with_decimal(tmp_path):
+    """Values < 10 of a unit show one decimal place (1 GiB → 1.0G)."""
+    cfg, traffic = make_config(tmp_path)
+    (traffic / "alice/down").mkdir(parents=True)
+    (traffic / "alice/up").mkdir(parents=True)
+    (traffic / "alice/down/2024-01-01").write_text("1073741824\n")  # 1 GiB
+    (traffic / "alice/up/2024-01-01").write_text("0\n")
+    result = run(STATS_QUERY, "2024-01-01", env=script_env(cfg))
+    assert result.returncode == 0, result.stderr
+    stripped = strip_ansi(result.stdout)
+    assert "1.0G" in stripped
+
+
+def test_stats_query_pretty_header_drops_mb_label(tmp_path):
+    """Header no longer says '(mb)' since values now carry their own unit."""
+    cfg, traffic = make_config(tmp_path)
+    (traffic / "alice/down").mkdir(parents=True)
+    (traffic / "alice/up").mkdir(parents=True)
+    (traffic / "alice/down/2024-01-01").write_text("100\n")
+    (traffic / "alice/up/2024-01-01").write_text("0\n")
+    result = run(STATS_QUERY, "2024-01-01", env=script_env(cfg))
+    assert result.returncode == 0, result.stderr
+    stripped = strip_ansi(result.stdout)
+    assert "(mb)" not in stripped
 
 
 # ---- stats-shrink --------------------------------------------------------
