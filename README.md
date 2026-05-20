@@ -16,7 +16,11 @@
 
 ## Configuration
 
-The traffic data directory is stored in `/usr/local/etc/xray-stats/directory`. You can change this by re-running the `install.sh` script with a different directory.
+The traffic data directory is stored in `/usr/local/etc/xray-stats/directory`, and the xray stats API address (`host:port`) is stored in `/usr/local/etc/xray-stats/server`. You can change either by editing the file directly or re-running `install.sh` with different arguments:
+
+```sh
+./install.sh <traffic-data-dir> <api-server>
+```
 
 ## How it works
 
