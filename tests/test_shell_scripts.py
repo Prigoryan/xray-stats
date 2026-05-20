@@ -150,7 +150,10 @@ def test_stats_query_sums_daily(tmp_path):
     (traffic / "alice/up/2024-01-01").write_text("524288\n")
     result = run(STATS_QUERY, "--plain", "2024-01-01", env=script_env(cfg))
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "alice 2097152 524288"
+    assert result.stdout.splitlines() == [
+        "alice 2097152 524288 2621440",
+        "total 2097152 524288 2621440",
+    ]
 
 
 def test_stats_query_sums_monthly(tmp_path):
@@ -163,7 +166,10 @@ def test_stats_query_sums_monthly(tmp_path):
     (traffic / "bob/up/2024-01-10").write_text("50\n")
     result = run(STATS_QUERY, "--plain", "2024-01", env=script_env(cfg))
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "bob 300 50"
+    assert result.stdout.splitlines() == [
+        "bob 300 50 350",
+        "total 300 50 350",
+    ]
 
 
 def test_stats_query_user_glob(tmp_path):
@@ -176,7 +182,19 @@ def test_stats_query_user_glob(tmp_path):
     result = run(STATS_QUERY, "--plain", "2024-01-01", "a*", env=script_env(cfg))
     assert result.returncode == 0, result.stderr
     users = [line.split()[0] for line in result.stdout.strip().splitlines()]
-    assert users == ["alice"]
+    assert users == ["alice", "total"]
+
+
+def test_stats_query_total_sums_across_users(tmp_path):
+    cfg, traffic = make_config(tmp_path)
+    for user, down, up in [("alice", 100, 50), ("bob", 200, 80)]:
+        (traffic / user / "down").mkdir(parents=True)
+        (traffic / user / "up").mkdir(parents=True)
+        (traffic / user / "down/2024-01-01").write_text(f"{down}\n")
+        (traffic / user / "up/2024-01-01").write_text(f"{up}\n")
+    result = run(STATS_QUERY, "--plain", "2024-01-01", env=script_env(cfg))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[-1] == "total 300 130 430"
 
 
 # ---- stats-shrink --------------------------------------------------------

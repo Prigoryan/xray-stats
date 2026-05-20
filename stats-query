@@ -21,26 +21,35 @@ print-header() {
 
     echo -e "\033[1;33m$queryUser:  \033[1;0m$queryDate\033[1;0m"
     echo
-    echo -e "           \033[1;34m↓ down (mb) \033[1;32m↑ up (mb)\033[1;0m"
+    echo -e "           \033[1;34m↓ down (mb) \033[1;32m↑ up (mb) \033[1;35m∑ total (mb)\033[1;0m"
 }
 
 print-user-stats() {
     local username=$1
     local down=${2:-0}
     local up=${3:-0}
+    local combined=$((down + up))
 
-    if [ "$down" -eq 0 ] && [ "$up" -eq 0 ]; then
+    if [ "$combined" -eq 0 ]; then
         return
     fi
 
     if [ "$isPlainOutput" = true ]; then
-        echo "$username $down $up"
+        echo "$username $down $up $combined"
         return
     fi
 
     local downMb=$((down / 1024 / 1024))
     local upMb=$((up / 1024 / 1024))
-    printf "%-10s \033[1;34m%10s \033[1;32m%10s\033[1;0m\n" "$username" "$downMb" "$upMb"
+    local combinedMb=$((combined / 1024 / 1024))
+    local nameColor='' reset=''
+    if [ "$username" = total ]; then
+        echo
+        nameColor=$'\033[1;33m'
+        reset=$'\033[1;0m'
+    fi
+    printf '%s%-10s%s \033[1;34m%10s \033[1;32m%10s \033[1;35m%10s\033[1;0m\n' \
+        "$nameColor" "$username" "$reset" "$downMb" "$upMb" "$combinedMb"
 }
 
 query() {
@@ -50,6 +59,7 @@ query() {
 
     print-header "$queryUser" "$queryDate"
 
+    local totalDown=0 totalUp=0
     for userDir in "$TRAFFIC_DIR"/$queryUser; do
         # shellcheck disable=SC2206 # $suffix is "" or "-*" — intentional glob.
         local downFiles=("$userDir/down/$queryDate"$suffix)
@@ -60,7 +70,11 @@ query() {
         up=$(sum-num-file "${upFiles[@]}")
 
         print-user-stats "$(basename "$userDir")" "$down" "$up"
+        totalDown=$((totalDown + down))
+        totalUp=$((totalUp + up))
     done
+
+    print-user-stats total "$totalDown" "$totalUp"
 }
 
 
