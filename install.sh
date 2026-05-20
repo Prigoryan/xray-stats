@@ -29,11 +29,11 @@ mkdir -p /usr/local/etc/xray-stats
 echo "$trafficDataDir" > /usr/local/etc/xray-stats/directory
 echo "$apiServer" > /usr/local/etc/xray-stats/server
 
+cp "$here/stats-utils.sh" "$here/stats-query" "$here/stats-shrink" \
+    "$here/stats-collect" "$here/stats-to-user-down-up.jq" \
+    /usr/local/bin
+
 {
     crontab -l 2>/dev/null | grep -v '/usr/local/bin/stats-' || true
     cat "$here/xray-stats.cron"
 } | crontab -
-
-cp "$here/stats-utils.sh" "$here/stats-query" "$here/stats-shrink" \
-    "$here/stats-collect" "$here/stats-to-user-down-up.jq" \
-    /usr/local/bin
