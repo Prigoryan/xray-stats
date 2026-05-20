@@ -173,20 +173,31 @@ def parse_jsonc(text):
 
 
 def plan_inserts(root):
-    """Return dict mapping insert position -> list of strings to insert there."""
+    """Plan surgical inserts to enable stats.
+
+    Returns dict mapping insert position -> {"empty": bool, "items": [str]}.
+    "empty" tracks whether the parent object/array was empty before our
+    inserts. apply_inserts uses this to decide whether to append a
+    trailing comma (to connect to existing content) or not (avoiding a
+    trailing comma in a single-item container).
+    """
     if not isinstance(root, Obj):
         raise ValueError("Top-level config must be a JSON object")
 
     inserts = {}
 
-    def add(pos, content):
-        inserts.setdefault(pos, []).append(content)
+    def add(pos, content, container_empty):
+        if pos in inserts:
+            inserts[pos]["items"].append(content)
+        else:
+            inserts[pos] = {"empty": container_empty, "items": [content]}
 
     fields = root.fields
+    root_empty = not fields
 
     # .stats = {}
     if "stats" not in fields:
-        add(root.open_pos + 1, f'\n{IND}"stats": {{}},')
+        add(root.open_pos + 1, f'\n{IND}"stats": {{}}', root_empty)
 
     # .api object with tag and services
     api = fields.get("api")
@@ -196,24 +207,24 @@ def plan_inserts(root):
             f'\n{IND}"api": {{'
             f'\n{IND * 2}"tag": "api",'
             f'\n{IND * 2}"services": [{svc}]'
-            f"\n{IND}}},"
+            f"\n{IND}}}"
         )
-        add(root.open_pos + 1, block)
+        add(root.open_pos + 1, block, root_empty)
     elif isinstance(api, Obj):
+        api_empty = not api.fields
         if "tag" not in api:
-            add(api.open_pos + 1, f'\n{IND * 2}"tag": "api",')
+            add(api.open_pos + 1, f'\n{IND * 2}"tag": "api"', api_empty)
 
         services = api.get("services")
         if services is None:
             svc = ", ".join(f'"{s}"' for s in WANTED_SERVICES)
-            add(api.open_pos + 1, f'\n{IND * 2}"services": [{svc}],')
+            add(api.open_pos + 1, f'\n{IND * 2}"services": [{svc}]', api_empty)
         elif isinstance(services, Arr):
             existing = [it.value for it in services.items if isinstance(it, Lit)]
             missing = [s for s in WANTED_SERVICES if s not in existing]
             if missing:
                 add_str = ", ".join(f'"{m}"' for m in missing)
-                sep = ", " if services.items else ""
-                add(services.open_pos + 1, add_str + sep)
+                add(services.open_pos + 1, add_str, not services.items)
 
     # .policy
     policy = fields.get("policy")
@@ -232,16 +243,18 @@ def plan_inserts(root):
             f'\n{IND * 3}"statsOutboundUplink": true,'
             f'\n{IND * 3}"statsOutboundDownlink": true'
             f"\n{IND * 2}}}"
-            f"\n{IND}}},"
+            f"\n{IND}}}"
         )
-        add(root.open_pos + 1, block)
+        add(root.open_pos + 1, block, root_empty)
     elif isinstance(policy, Obj):
+        policy_empty = not policy.fields
         levels = policy.get("levels")
         if levels is None:
             add(
                 policy.open_pos + 1,
                 f'\n{IND * 2}"levels": {{ "0": {{ "statsUserUplink": true,'
-                f' "statsUserDownlink": true }} }},',
+                f' "statsUserDownlink": true }} }}',
+                policy_empty,
             )
         elif isinstance(levels, Obj):
             zero = levels.get("0")
@@ -249,12 +262,18 @@ def plan_inserts(root):
                 add(
                     levels.open_pos + 1,
                     f'\n{IND * 3}"0": {{ "statsUserUplink": true,'
-                    f' "statsUserDownlink": true }},',
+                    f' "statsUserDownlink": true }}',
+                    not levels.fields,
                 )
             elif isinstance(zero, Obj):
+                zero_empty = not zero.fields
                 for key in ("statsUserUplink", "statsUserDownlink"):
                     if key not in zero:
-                        add(zero.open_pos + 1, f'\n{IND * 4}"{key}": true,')
+                        add(
+                            zero.open_pos + 1,
+                            f'\n{IND * 4}"{key}": true',
+                            zero_empty,
+                        )
 
         system = policy.get("system")
         if system is None:
@@ -262,9 +281,11 @@ def plan_inserts(root):
                 policy.open_pos + 1,
                 f'\n{IND * 2}"system": {{ "statsInboundUplink": false,'
                 f' "statsInboundDownlink": false, "statsOutboundUplink": true,'
-                f' "statsOutboundDownlink": true }},',
+                f' "statsOutboundDownlink": true }}',
+                policy_empty,
             )
         elif isinstance(system, Obj):
+            system_empty = not system.fields
             for key, want in [
                 ("statsInboundUplink", "false"),
                 ("statsInboundDownlink", "false"),
@@ -272,7 +293,11 @@ def plan_inserts(root):
                 ("statsOutboundDownlink", "true"),
             ]:
                 if key not in system:
-                    add(system.open_pos + 1, f'\n{IND * 3}"{key}": {want},')
+                    add(
+                        system.open_pos + 1,
+                        f'\n{IND * 3}"{key}": {want}',
+                        system_empty,
+                    )
 
     # .inbounds — ensure dokodemo-door for api
     api_inbound = (
@@ -284,7 +309,8 @@ def plan_inserts(root):
     if inbounds is None:
         add(
             root.open_pos + 1,
-            f'\n{IND}"inbounds": [\n{IND * 2}{api_inbound}\n{IND}],',
+            f'\n{IND}"inbounds": [\n{IND * 2}{api_inbound}\n{IND}]',
+            root_empty,
         )
     elif isinstance(inbounds, Arr):
         has_api = any(
@@ -294,8 +320,11 @@ def plan_inserts(root):
             for item in inbounds.items
         )
         if not has_api:
-            sep = "," if inbounds.items else ""
-            add(inbounds.open_pos + 1, f"\n{IND * 2}{api_inbound}{sep}")
+            add(
+                inbounds.open_pos + 1,
+                f"\n{IND * 2}{api_inbound}",
+                not inbounds.items,
+            )
 
     # .routing.rules — ensure api routing rule (prepended)
     api_rule = (
@@ -305,12 +334,18 @@ def plan_inserts(root):
     if routing is None:
         add(
             root.open_pos + 1,
-            f'\n{IND}"routing": {{ "rules": [{api_rule}] }},',
+            f'\n{IND}"routing": {{ "rules": [{api_rule}] }}',
+            root_empty,
         )
     elif isinstance(routing, Obj):
+        routing_empty = not routing.fields
         rules = routing.get("rules")
         if rules is None:
-            add(routing.open_pos + 1, f'\n{IND * 2}"rules": [{api_rule}],')
+            add(
+                routing.open_pos + 1,
+                f'\n{IND * 2}"rules": [{api_rule}]',
+                routing_empty,
+            )
         elif isinstance(rules, Arr):
             has_rule = any(
                 isinstance(item, Obj)
@@ -324,8 +359,11 @@ def plan_inserts(root):
                 for item in rules.items
             )
             if not has_rule:
-                sep = "," if rules.items else ""
-                add(rules.open_pos + 1, f"\n{IND * 3}{api_rule}{sep}")
+                add(
+                    rules.open_pos + 1,
+                    f"\n{IND * 3}{api_rule}",
+                    not rules.items,
+                )
 
     return inserts
 
@@ -335,8 +373,11 @@ def apply_inserts(text, inserts):
     i = 0
     for pos in sorted(inserts.keys()):
         out.append(text[i:pos])
-        for content in inserts[pos]:
-            out.append(content)
+        spec = inserts[pos]
+        joined = ",".join(spec["items"])
+        if not spec["empty"]:
+            joined += ","
+        out.append(joined)
         i = pos
     out.append(text[i:])
     return "".join(out)
@@ -368,7 +409,7 @@ def main():
     print(f"Backup: {backup}")
 
     config_path.write_text(new_text)
-    n_changes = sum(len(v) for v in inserts.values())
+    n_changes = sum(len(v["items"]) for v in inserts.values())
     print(f"{config_path}: applied {n_changes} change(s).")
 
 
