@@ -47,6 +47,7 @@ cell() {
 print-header() {
     queryUser=$1
     queryDate=$2
+    local nameWidth=${3:-8}
 
     if [ "$isPlainOutput" = true ]; then
         return
@@ -54,11 +55,11 @@ print-header() {
 
     echo -e "\033[1;33m$queryUser:\033[0m  $queryDate"
     echo
-    # Column header row: empty name area, then three columns right-aligned
-    # within a 7-visible-char box, separated by 2-space gaps. Leading spaces
-    # are hand-tuned because printf width specifiers count UTF-8 byte length,
-    # not visible char width.
-    printf '  %-8s' ''
+    # Column header row: empty name area sized to nameWidth, then three
+    # 7-char value columns separated by 2-space gaps. Leading spaces inside
+    # each column header are hand-tuned because printf width specifiers
+    # count UTF-8 byte length, not visible char width.
+    printf '  %*s' "$nameWidth" ''
     printf ' %s↓ down%s'  "$DOWN"  "$R"
     printf '  '
     printf '   %s↑ up%s'  "$UP"    "$R"
@@ -71,6 +72,7 @@ print-user-stats() {
     local username=$1
     local down=${2:-0}
     local up=${3:-0}
+    local nameWidth=${4:-8}
     local combined=$((down + up))
 
     if [ "$combined" -eq 0 ]; then
@@ -88,7 +90,8 @@ print-user-stats() {
         nameColor=$'\033[1;33m'
         nameReset=$R
     fi
-    printf '  %s%-8s%s' "$nameColor" "$username" "$nameReset"
+    # %-*.*s pads short names and truncates over-long ones to exactly nameWidth.
+    printf '  %s%-*.*s%s' "$nameColor" "$nameWidth" "$nameWidth" "$username" "$nameReset"
     cell "$down"     "$DOWN"  7
     printf '  '
     cell "$up"       "$UP"    7
@@ -102,7 +105,27 @@ query() {
     local queryDate=$2
     local suffix=$3  # "" for a single day, "-*" for a whole month
 
-    print-header "$queryUser" "$queryDate"
+    # Name column width = longest matching username, floor 8, then capped by
+    # terminal width minus the value columns' fixed cost (2-space lead + three
+    # 7-char value columns + two 2-space gaps = 27) so long names truncate
+    # instead of wrapping the line. The cap only applies on an interactive
+    # terminal; when piped, names print in full.
+    local nameWidth=8 name
+    for userDir in "$TRAFFIC_DIR"/$queryUser; do
+        name=$(basename "$userDir")
+        (( ${#name} > nameWidth )) && nameWidth=${#name}
+    done
+    if [ -t 1 ]; then
+        local termCols=0
+        termCols=$(tput cols 2>/dev/null || echo 0)
+        if (( termCols > 0 )); then
+            local maxNameWidth=$((termCols - 27))
+            (( maxNameWidth < 8 )) && maxNameWidth=8
+            (( nameWidth > maxNameWidth )) && nameWidth=$maxNameWidth
+        fi
+    fi
+
+    print-header "$queryUser" "$queryDate" "$nameWidth"
 
     local totalDown=0 totalUp=0
     for userDir in "$TRAFFIC_DIR"/$queryUser; do
@@ -114,12 +137,12 @@ query() {
         down=$(sum-num-file "${downFiles[@]}")
         up=$(sum-num-file "${upFiles[@]}")
 
-        print-user-stats "$(basename "$userDir")" "$down" "$up"
+        print-user-stats "$(basename "$userDir")" "$down" "$up" "$nameWidth"
         totalDown=$((totalDown + down))
         totalUp=$((totalUp + up))
     done
 
-    print-user-stats total "$totalDown" "$totalUp"
+    print-user-stats total "$totalDown" "$totalUp" "$nameWidth"
 }
 
 

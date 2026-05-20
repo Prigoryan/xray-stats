@@ -258,6 +258,28 @@ def test_stats_query_pretty_header_drops_mb_label(tmp_path):
     assert "(mb)" not in stripped
 
 
+def test_stats_query_pretty_long_username_aligns_with_short(tmp_path):
+    """Name column expands to the longest username so value columns stay aligned."""
+    cfg, traffic = make_config(tmp_path)
+    for u in ("bob", "averylongusername"):
+        (traffic / u / "down").mkdir(parents=True)
+        (traffic / u / "up").mkdir(parents=True)
+        (traffic / u / "down/2024-01-01").write_text("12288\n")  # 12 KiB
+        (traffic / u / "up/2024-01-01").write_text("0\n")
+    result = run(STATS_QUERY, "2024-01-01", env=script_env(cfg))
+    assert result.returncode == 0, result.stderr
+    stripped = strip_ansi(result.stdout)
+    lines = stripped.splitlines()
+    bob_row = next(line for line in lines if line.lstrip().startswith("bob "))
+    long_row = next(line for line in lines if "averylongusername" in line)
+    bob_12k = bob_row.index("12K")
+    long_12k = long_row.index("12K")
+    assert bob_12k == long_12k, (
+        f"Misaligned: bob has 12K at col {bob_12k}, long-name row at col {long_12k}.\n"
+        f"  bob_row:  {bob_row!r}\n  long_row: {long_row!r}"
+    )
+
+
 # ---- stats-shrink --------------------------------------------------------
 
 
