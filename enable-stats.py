@@ -172,6 +172,10 @@ def parse_jsonc(text):
     return p.parse_value()
 
 
+def lit_value(node, default=None):
+    return node.value if isinstance(node, Lit) else default
+
+
 def plan_inserts(root):
     """Plan surgical inserts to enable stats.
 
@@ -314,9 +318,7 @@ def plan_inserts(root):
         )
     elif isinstance(inbounds, Arr):
         has_api = any(
-            isinstance(item, Obj)
-            and isinstance(item.get("tag"), Lit)
-            and item.get("tag").value == "api"
+            isinstance(item, Obj) and lit_value(item.get("tag")) == "api"
             for item in inbounds.items
         )
         if not has_api:
@@ -347,17 +349,17 @@ def plan_inserts(root):
                 routing_empty,
             )
         elif isinstance(rules, Arr):
-            has_rule = any(
-                isinstance(item, Obj)
-                and isinstance(item.get("inboundTag"), Arr)
-                and any(
-                    isinstance(t, Lit) and t.value == "api"
-                    for t in item.get("inboundTag").items
+            def is_api_rule(item):
+                if not isinstance(item, Obj):
+                    return False
+                if lit_value(item.get("outboundTag")) != "api":
+                    return False
+                inbound = item.get("inboundTag")
+                return isinstance(inbound, Arr) and any(
+                    lit_value(t) == "api" for t in inbound.items
                 )
-                and isinstance(item.get("outboundTag"), Lit)
-                and item.get("outboundTag").value == "api"
-                for item in rules.items
-            )
+
+            has_rule = any(is_api_rule(item) for item in rules.items)
             if not has_rule:
                 add(
                     rules.open_pos + 1,

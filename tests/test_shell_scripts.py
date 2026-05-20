@@ -1,14 +1,11 @@
-"""End-to-end tests for the shell scripts.
+"""End-to-end tests for the shell scripts via XRAY_STATS_CONFIG_DIR."""
 
-Each test sets up an isolated XRAY_STATS_CONFIG_DIR pointing at a tmp_path
-fixture, then invokes the script under test via subprocess. This mirrors
-the production code path (file-backed config + script entry point) without
-touching /usr/local/etc.
-"""
-
+import datetime
 import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -20,7 +17,6 @@ INSTALL = REPO_ROOT / "install.sh"
 
 
 def make_config(tmp_path, traffic_dir=None, api_server="127.0.0.1:10085"):
-    """Build an isolated XRAY_STATS_CONFIG_DIR fixture."""
     cfg = tmp_path / "etc"
     cfg.mkdir()
     if traffic_dir is None:
@@ -31,9 +27,11 @@ def make_config(tmp_path, traffic_dir=None, api_server="127.0.0.1:10085"):
     return cfg, Path(traffic_dir)
 
 
-def script_env(config_dir):
+def script_env(config_dir, bin_dir=None):
     env = os.environ.copy()
     env["XRAY_STATS_CONFIG_DIR"] = str(config_dir)
+    if bin_dir is not None:
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     return env
 
 
@@ -112,7 +110,6 @@ def test_sum_num_file_all_non_numeric_returns_zero(tmp_path):
 def test_sum_num_file_handles_large_sum(tmp_path):
     """Sums larger than 2^32 don't get formatted as scientific notation."""
     f = tmp_path / "big"
-    # 5 lines of ~200GB each → 10^12-ish total
     f.write_text("\n".join(["200000000000"] * 5) + "\n")
     assert call_sum(tmp_path, f) == "1000000000000"
 
@@ -120,47 +117,20 @@ def test_sum_num_file_handles_large_sum(tmp_path):
 # ---- stats-query ---------------------------------------------------------
 
 
-def test_stats_query_rejects_bad_month(tmp_path):
-    """Month 13 is not a valid month."""
+@pytest.mark.parametrize(
+    "bad",
+    ["2024-13", "2024-00", "2024-02-32", "2024-02-00", "not-a-date"],
+)
+def test_stats_query_rejects_invalid_date(tmp_path, bad):
     cfg, _ = make_config(tmp_path)
-    result = run(STATS_QUERY, "2024-13", env=script_env(cfg))
+    result = run(STATS_QUERY, bad, env=script_env(cfg))
     assert result.returncode != 0
 
 
-def test_stats_query_rejects_month_zero(tmp_path):
+@pytest.mark.parametrize("good", ["2024-02-29", "2024-12"])
+def test_stats_query_accepts_valid_date(tmp_path, good):
     cfg, _ = make_config(tmp_path)
-    result = run(STATS_QUERY, "2024-00", env=script_env(cfg))
-    assert result.returncode != 0
-
-
-def test_stats_query_rejects_invalid_day(tmp_path):
-    """Day 32 is not a valid day."""
-    cfg, _ = make_config(tmp_path)
-    result = run(STATS_QUERY, "2024-02-32", env=script_env(cfg))
-    assert result.returncode != 0
-
-
-def test_stats_query_rejects_day_zero(tmp_path):
-    cfg, _ = make_config(tmp_path)
-    result = run(STATS_QUERY, "2024-02-00", env=script_env(cfg))
-    assert result.returncode != 0
-
-
-def test_stats_query_rejects_garbage(tmp_path):
-    cfg, _ = make_config(tmp_path)
-    result = run(STATS_QUERY, "not-a-date", env=script_env(cfg))
-    assert result.returncode != 0
-
-
-def test_stats_query_accepts_valid_date(tmp_path):
-    cfg, _ = make_config(tmp_path)
-    result = run(STATS_QUERY, "--plain", "2024-02-29", env=script_env(cfg))
-    assert result.returncode == 0
-
-
-def test_stats_query_accepts_valid_month(tmp_path):
-    cfg, _ = make_config(tmp_path)
-    result = run(STATS_QUERY, "--plain", "2024-12", env=script_env(cfg))
+    result = run(STATS_QUERY, "--plain", good, env=script_env(cfg))
     assert result.returncode == 0
 
 
@@ -176,8 +146,8 @@ def test_stats_query_sums_daily(tmp_path):
     cfg, traffic = make_config(tmp_path)
     (traffic / "alice/down").mkdir(parents=True)
     (traffic / "alice/up").mkdir(parents=True)
-    (traffic / "alice/down/2024-01-01").write_text("1048576\n1048576\n")  # 2 MiB
-    (traffic / "alice/up/2024-01-01").write_text("524288\n")              # 0.5 MiB → 0 MB int
+    (traffic / "alice/down/2024-01-01").write_text("1048576\n1048576\n")
+    (traffic / "alice/up/2024-01-01").write_text("524288\n")
     result = run(STATS_QUERY, "--plain", "2024-01-01", env=script_env(cfg))
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "alice 2097152 524288"
@@ -197,7 +167,6 @@ def test_stats_query_sums_monthly(tmp_path):
 
 
 def test_stats_query_user_glob(tmp_path):
-    """The user-glob argument filters which user dirs are summed."""
     cfg, traffic = make_config(tmp_path)
     for u in ("alice", "bob", "carol"):
         (traffic / u / "down").mkdir(parents=True)
@@ -234,6 +203,21 @@ def test_stats_shrink_no_files_noop(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_stats_shrink_preserves_total_across_runs(tmp_path):
+    """Idempotent: re-running yields the same value."""
+    cfg, traffic = make_config(tmp_path)
+    (traffic / "alice/down").mkdir(parents=True)
+    (traffic / "alice/up").mkdir(parents=True)
+    f = traffic / "alice/down/2024-01-01"
+    f.write_text("100\n200\n")
+    (traffic / "alice/up/2024-01-01").write_text("0\n")
+    run(STATS_SHRINK, "2024-01-01", env=script_env(cfg))
+    first = f.read_text()
+    run(STATS_SHRINK, "2024-01-01", env=script_env(cfg))
+    assert f.read_text() == first
+    assert first.strip() == "300"
+
+
 # ---- stats-collect -------------------------------------------------------
 
 
@@ -262,74 +246,36 @@ def test_stats_collect_writes_per_user_files(tmp_path):
         ("user>>>alice>>>traffic>>>downlink", "100"),
         ("user>>>alice>>>traffic>>>uplink", "50"),
     ])
-    env = script_env(cfg)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
 
-    result = run(STATS_COLLECT, env=env)
+    result = run(STATS_COLLECT, env=script_env(cfg, bin_dir=bin_dir))
     assert result.returncode == 0, result.stderr
 
-    today = subprocess.run(
-        ["date", "+%F"], capture_output=True, text=True
-    ).stdout.strip()
+    today = datetime.date.today().isoformat()
     assert (traffic / "alice/down" / today).read_text().strip() == "100"
     assert (traffic / "alice/up" / today).read_text().strip() == "50"
 
 
-def test_stats_collect_rejects_path_traversal_user(tmp_path):
-    """A user name containing '/' must not escape TRAFFIC_DIR."""
+@pytest.mark.parametrize("bad_user", ["../escape", "..", ".", "a/b"])
+def test_stats_collect_rejects_unsafe_user(tmp_path, bad_user):
+    """A suspicious user name must not write outside TRAFFIC_DIR; a legit
+    entry alongside must still be recorded."""
     cfg, traffic = make_config(tmp_path)
     bin_dir = tmp_path / "bin"
     make_xray_shim(bin_dir, [
-        ("user>>>../escape>>>traffic>>>downlink", "1000"),
-        ("user>>>../escape>>>traffic>>>uplink", "2000"),
+        (f"user>>>{bad_user}>>>traffic>>>downlink", "1000"),
+        (f"user>>>{bad_user}>>>traffic>>>uplink", "2000"),
         ("user>>>alice>>>traffic>>>downlink", "100"),
         ("user>>>alice>>>traffic>>>uplink", "50"),
     ])
-    env = script_env(cfg)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
 
-    result = run(STATS_COLLECT, env=env)
+    result = run(STATS_COLLECT, env=script_env(cfg, bin_dir=bin_dir))
     assert result.returncode == 0, result.stderr
 
-    # The legit user got recorded.
-    today = subprocess.run(
-        ["date", "+%F"], capture_output=True, text=True
-    ).stdout.strip()
-    assert (traffic / "alice/down" / today).exists()
+    today = datetime.date.today().isoformat()
+    assert (traffic / "alice/down" / today).read_text().strip() == "100"
+    assert (traffic / "alice/up" / today).read_text().strip() == "50"
 
-    # The malicious user did NOT escape the traffic dir.
-    assert not (tmp_path / "escape").exists()
-    assert not (traffic / ".." / "escape").exists()
+    # Nothing named "escape" anywhere, and traffic_dir has only "alice".
     assert not list(tmp_path.rglob("escape"))
+    assert [p.name for p in traffic.iterdir()] == ["alice"]
     assert "suspicious" in result.stderr
-
-
-def test_stats_collect_skips_dotdot_user(tmp_path):
-    cfg, traffic = make_config(tmp_path)
-    bin_dir = tmp_path / "bin"
-    make_xray_shim(bin_dir, [
-        ("user>>>..>>>traffic>>>downlink", "1000"),
-        ("user>>>..>>>traffic>>>uplink", "2000"),
-    ])
-    env = script_env(cfg)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
-
-    result = run(STATS_COLLECT, env=env)
-    assert result.returncode == 0, result.stderr
-    # No siblings of TRAFFIC_DIR should have been created.
-    assert list(traffic.iterdir()) == []
-
-
-def test_stats_shrink_preserves_total_across_runs(tmp_path):
-    """Shrinking is idempotent: re-running yields the same value."""
-    cfg, traffic = make_config(tmp_path)
-    (traffic / "alice/down").mkdir(parents=True)
-    (traffic / "alice/up").mkdir(parents=True)
-    f = traffic / "alice/down/2024-01-01"
-    f.write_text("100\n200\n")
-    (traffic / "alice/up/2024-01-01").write_text("0\n")
-    run(STATS_SHRINK, "2024-01-01", env=script_env(cfg))
-    first = f.read_text()
-    run(STATS_SHRINK, "2024-01-01", env=script_env(cfg))
-    assert f.read_text() == first
-    assert first.strip() == "300"

@@ -2,12 +2,13 @@
 
 set -eo pipefail
 
-source "$(dirname "$0")/stats-utils.sh"
+here=$(dirname -- "$0")
+source "$here/stats-utils.sh"
 
 PATH=$PATH:/usr/local/bin:/usr/bin:/bin
 stats=$(xray api statsquery -server "$API_SERVER" -reset)
 today=$(date +%F)
-user_down_up=$(jq -r -f "$(dirname "$0")/stats-to-user-down-up.jq" <<< "$stats")
+user_down_up=$(jq -r -f "$here/stats-to-user-down-up.jq" <<< "$stats")
 
 mkdir -p "$TRAFFIC_DIR"
 while IFS= read -r line; do
@@ -20,6 +21,10 @@ while IFS= read -r line; do
     # Reject names that would escape TRAFFIC_DIR.
     if [[ -z "$user" || "$user" == *"/"* || "$user" == "." || "$user" == ".." ]]; then
         echo "[stats-collect] skipping suspicious user name: $user" >&2
+        continue
+    fi
+
+    if [[ "$down" == 0 && "$up" == 0 ]]; then
         continue
     fi
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -eo pipefail
+shopt -s nullglob
 
 shrinkDate=${1:-$(date +%F)}
 
@@ -9,15 +10,15 @@ source "$(dirname "$0")/stats-utils.sh"
 shrink() {
     local sum
     sum=$(sum-num-file "$1")
+    # Skip rewrite when already collapsed (cron runs twice an hour).
+    if [[ "$(<"$1")" == "$sum" ]]; then
+        return
+    fi
     echo "$sum" > "$1"
 }
 
 # shellcheck disable=SC2231 # Can contain globs. stats-shrink '2024-09-*'
 for statsFile in "$TRAFFIC_DIR"/*/{down,up}/$shrinkDate; do
-    if [ ! -f "$statsFile" ]; then
-        continue
-    fi
-
-    echo "Shrink: ""$statsFile"
+    echo "Shrink: $statsFile"
     shrink "$statsFile"
 done

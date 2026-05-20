@@ -45,37 +45,21 @@ print-user-stats() {
 
 query() {
     local queryUser=${1:-*}
-    local queryDate="$2"
+    local queryDate=$2
+    local suffix=$3  # "" for a single day, "-*" for a whole month
 
     print-header "$queryUser" "$queryDate"
 
     for userDir in "$TRAFFIC_DIR"/$queryUser; do
-        username=$(basename "$userDir")
-        down=$(sum-num-file "$userDir/down/$queryDate")
-        up=$(sum-num-file "$userDir/up/$queryDate")
-
-        print-user-stats "$username" "$down" "$up"
-    done
-}
-
-query-monthly() {
-    local queryUser=${1:-*}
-    local queryDate="$2"
-
-    print-header "$queryUser" "$queryDate"
-
-    for userDir in "$TRAFFIC_DIR"/$queryUser; do
-        local down=0
-        local up=0
-
-        downFiles=("$userDir/down/$queryDate-"*)
-        upFiles=("$userDir/up/$queryDate-"*)
-
+        # shellcheck disable=SC2206 # $suffix is "" or "-*" — intentional glob.
+        local downFiles=("$userDir/down/$queryDate"$suffix)
+        # shellcheck disable=SC2206
+        local upFiles=("$userDir/up/$queryDate"$suffix)
+        local down up
         down=$(sum-num-file "${downFiles[@]}")
         up=$(sum-num-file "${upFiles[@]}")
 
-        username=$(basename "$userDir")
-        print-user-stats "$username" "$down" "$up"
+        print-user-stats "$(basename "$userDir")" "$down" "$up"
     done
 }
 
@@ -84,12 +68,12 @@ queryDate=${1:-$(date +%F)}
 queryUser="${2:-*}"
 
 if [[ "$queryDate" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ ]]; then
-    query-monthly "$queryUser" "$queryDate"
+    query "$queryUser" "$queryDate" "-*"
     exit 0
 fi
 
 if [[ "$queryDate" =~ ^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$ ]]; then
-    query "$queryUser" "$queryDate"
+    query "$queryUser" "$queryDate" ""
     exit 0
 fi
 

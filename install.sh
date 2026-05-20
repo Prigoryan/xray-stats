@@ -21,13 +21,14 @@ trafficDataDir=${1:-$DEFAULT_TRAFFIC_DATA_DIR}
 apiServer=${2:-$DEFAULT_API_SERVER}
 xrayConfig=${3:-$DEFAULT_XRAY_CONFIG}
 
-"$(dirname "$0")/enable-stats.sh" "$xrayConfig"
+here=$(dirname -- "$0")
+
+"$here/enable-stats.sh" "$xrayConfig"
 
 mkdir -p /usr/local/etc/xray-stats
 echo "$trafficDataDir" > /usr/local/etc/xray-stats/directory
 echo "$apiServer" > /usr/local/etc/xray-stats/server
 
-here=$(dirname "$0")
 {
     crontab -l 2>/dev/null | grep -v '/usr/local/bin/stats-' || true
     cat "$here/xray-stats.cron"
