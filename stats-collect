@@ -4,9 +4,10 @@ set -eo pipefail
 
 source "$(dirname "$0")/stats-utils.sh"
 
-stats=$(/usr/local/bin/xray api statsquery -server "$API_SERVER" -reset)
+PATH=$PATH:/usr/local/bin:/usr/bin:/bin
+stats=$(xray api statsquery -server "$API_SERVER" -reset)
 today=$(date +%F)
-user_down_up=$(/usr/bin/jq -r -f "$(dirname "$0")/stats-to-user-down-up.jq" <<< "$stats")
+user_down_up=$(jq -r -f "$(dirname "$0")/stats-to-user-down-up.jq" <<< "$stats")
 
 mkdir -p "$TRAFFIC_DIR"
 while IFS= read -r line; do
@@ -15,6 +16,13 @@ while IFS= read -r line; do
     fi
 
     IFS=$'\t' read -r user down up <<< "$line"
+
+    # Reject names that would escape TRAFFIC_DIR.
+    if [[ -z "$user" || "$user" == *"/"* || "$user" == "." || "$user" == ".." ]]; then
+        echo "[stats-collect] skipping suspicious user name: $user" >&2
+        continue
+    fi
+
     echo "[stats-collect] user: $user, down: $down, up: $up"
 
     mkdir -p "$TRAFFIC_DIR/$user/down" "$TRAFFIC_DIR/$user/up"

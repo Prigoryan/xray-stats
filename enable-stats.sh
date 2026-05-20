@@ -13,7 +13,11 @@ python3 "$(dirname "$0")/enable-stats.py" "$ff" || rc=$?
 
 case "$rc" in
     0)
-        systemctl restart xray
+        if command -v systemctl > /dev/null 2>&1; then
+            systemctl restart xray
+        else
+            echo "enable-stats: config patched; restart xray manually." >&2
+        fi
         ;;
     5)
         ;;

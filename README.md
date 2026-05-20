@@ -4,7 +4,7 @@
 
 `./install.sh`: Installs the scripts and sets up the environment.
 
-`./install.sh <traffic-data-dir>`: Installs the scripts and sets up the environment with the specified traffic data directory.
+`./install.sh [<traffic-data-dir> [<api-server> [<xray-config>]]]`: Same, with overrides for the traffic data directory, the xray stats API address, and the xray config path. Run with `--help` to see the defaults.
 
 ## Scripts
 

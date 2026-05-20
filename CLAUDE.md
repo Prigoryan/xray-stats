@@ -25,7 +25,8 @@ them as plain text files under `$TRAFFIC_DIR/<user>/<down|up>/<date>`.
 - `stats-shrink` — cron at `:29` and `:59`. Replaces each day's file
   with a single summed value to bound disk growth.
 - `stats-utils.sh` — sourced helpers. Exposes `TRAFFIC_DIR`,
-  `API_SERVER`, and `sum-num-file`.
+  `API_SERVER`, and `sum-num-file`. Reads from `$XRAY_STATS_CONFIG_DIR`
+  (defaults to `/usr/local/etc/xray-stats`).
 - `stats-to-user-down-up.jq` — emits tab-separated `<user>\t<down>\t<up>`.
 - `install.sh [<traffic-data-dir> [<api-server>]]` — installs to
   `/usr/local/bin`, writes config files, merges entries into the user's
@@ -33,6 +34,10 @@ them as plain text files under `$TRAFFIC_DIR/<user>/<down|up>/<date>`.
 - `xray-stats.cron` — cron schedule for collect + shrink.
 - `tests/test_enable_stats.py` — 16-test pytest suite for the JSONC
   editor. Self-contained; no dependency on gitignored fixtures.
+- `tests/test_shell_scripts.py` — 24-test pytest suite for the shell
+  scripts (sum-num-file, stats-query, stats-shrink, stats-collect,
+  install.sh --help). Uses `XRAY_STATS_CONFIG_DIR` to point scripts at
+  tmp_path fixtures instead of `/usr/local/etc/xray-stats`.
 
 ## Config files (system-level)
 
